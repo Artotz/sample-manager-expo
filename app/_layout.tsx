@@ -38,6 +38,9 @@ export default function RootLayout() {
           <NavThemeProvider value={NAV_THEME[colorScheme]}>
             <Stack>
               <Stack.Screen name="index" options={INDEX_OPTIONS} />
+              <Stack.Screen name="login" options={{ title: 'Login' }} />
+              <Stack.Screen name="amostra" options={{ title: 'Amostra' }} />
+              <Stack.Screen name="scan" options={{ title: 'Leitura' }} />
               <Stack.Screen name="modal" options={MODAL_OPTIONS} />
             </Stack>
           </NavThemeProvider>
