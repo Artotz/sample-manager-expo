@@ -1,59 +1,55 @@
 {
-    "expo":  {
-                 "name":  "sample-manager-expo",
-                 "slug":  "sample-manager-expo",
-                 "version":  "1.0.0",
-                 "scheme":  "sample-manager-expo",
-                 "platforms":  [
-                                   "ios",
-                                   "android"
-                               ],
-                 "web":  {
-                             "bundler":  "metro",
-                             "output":  "static",
-                             "favicon":  "./assets/favicon.png"
-                         },
-                 "plugins":  [
-                                 "expo-router",
-                                 "expo-secure-store",
-                                 "expo-barcode-scanner",
-                                 "expo-build-properties"
-                             ],
-                 "experiments":  {
-                                     "typedRoutes":  true,
-                                     "tsconfigPaths":  true
-                                 },
-                 "orientation":  "portrait",
-                 "icon":  "./assets/icon.png",
-                 "userInterfaceStyle":  "automatic",
-                 "splash":  {
-                                "image":  "./assets/splash.png",
-                                "resizeMode":  "contain",
-                                "backgroundColor":  "#ffffff"
-                            },
-                 "assetBundlePatterns":  [
-                                             "**/*"
-                                         ],
-                 "ios":  {
-                             "supportsTablet":  true,
-                             "infoPlist":  {
-                                               "NSCameraUsageDescription":  "Usamos a câmera para ler códigos de barras."
-                                           }
-                         },
-                 "android":  {
-                                 "adaptiveIcon":  {
-                                                      "foregroundImage":  "./assets/adaptive-icon.png",
-                                                      "backgroundColor":  "#ffffff"
-                                                  },
-                                 "package":  "com.artotz.samplemanagerexpo"
-                             },
-                 "extra":  {
-                               "router":  {
-
-                                          },
-                               "eas":  {
-                                           "projectId":  "0415960e-759c-4765-9990-5b9e454e13d6"
-                                       }
-                           }
-             }
+  "expo": {
+    "name": "sample-manager-expo",
+    "slug": "sample-manager-expo",
+    "version": "1.0.0",
+    "scheme": "sample-manager-expo",
+    "platforms": ["ios", "android"],
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-build-properties",
+      [
+        "react-native-vision-camera",
+        { "cameraPermissionText": "Usamos a câmera para ler códigos de barras." }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "tsconfigPaths": true
+    },
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Usamos a câmera para ler códigos de barras."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.artotz.samplemanagerexpo"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0415960e-759c-4765-9990-5b9e454e13d6"
+      }
+    }
+  }
 }
