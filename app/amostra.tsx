@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Modal, ScrollView, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { router, type Href } from 'expo-router';
 import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
@@ -10,6 +10,8 @@ import { Text } from '@/components/nativewindui/Text';
 import { getToken } from '@/lib/session';
 import { s360GetAmostra } from '@/lib/s360/api';
 import { useColorScheme } from '@/lib/useColorScheme';
+
+import type { CameraRuntimeError } from 'react-native-vision-camera';
 
 type AmostraRow = {
   amostra: string;
@@ -170,6 +172,8 @@ export default function AmostraScreen() {
   >({});
   const [exportContent, setExportContent] = useState<string | null>(null);
   const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [cameraUnavailable, setCameraUnavailable] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
   const { isDarkColorScheme } = useColorScheme();
 
@@ -231,6 +235,24 @@ export default function AmostraScreen() {
   }, []);
 
   useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (state) => {
+      if (state === 'active') {
+        setCameraError(null);
+        setCameraUnavailable(false);
+        setScannerReady(true);
+        const status = Camera.getCameraPermissionStatus();
+        if (status !== 'granted') {
+          const updated = await Camera.requestCameraPermission();
+          setHasPermission(updated === 'granted');
+        }
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!historyLoaded) return;
     void SecureStore.setItemAsync(HISTORY_STORAGE_KEY, JSON.stringify(history));
   }, [history, historyLoaded]);
@@ -282,9 +304,16 @@ export default function AmostraScreen() {
     },
   });
 
-  const handleRescan = useCallback(() => {
+  const handleRescan = useCallback(async () => {
     setError(null);
     setScannerReady(true);
+    setCameraError(null);
+    setCameraUnavailable(false);
+    const status = Camera.getCameraPermissionStatus();
+    if (status !== 'granted') {
+      const updated = await Camera.requestCameraPermission();
+      setHasPermission(updated === 'granted');
+    }
   }, []);
 
   const handleExport = useCallback(async () => {
@@ -333,6 +362,19 @@ export default function AmostraScreen() {
     }
   }, [closeExportModal, exportContent]);
 
+  const handleCameraError = useCallback((err: CameraRuntimeError) => {
+    const code = err?.code ?? '';
+    if (code === 'system/camera-is-restricted') {
+      setCameraError(
+        'Uso da camera restrito pelo sistema. Verifique permissoes ou politicas do dispositivo.'
+      );
+    } else {
+      setCameraError(err?.message ?? 'Falha ao iniciar camera.');
+    }
+    setCameraUnavailable(true);
+    setScannerReady(false);
+  }, []);
+
   if (hasPermission === null || device == null) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -359,28 +401,46 @@ export default function AmostraScreen() {
   return (
     <View style={{ flex: 1 }}>
       <View style={{ flex: 1 }}>
-        <Camera
-          style={{ flex: 1 }}
-          device={device}
-          isActive={!!isFocused && !!hasPermission}
-          codeScanner={codeScanner}
-        />
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            padding: 16,
-            backgroundColor: 'rgba(0,0,0,0.35)',
-          }}>
-          <Text className="text-white">
-            {scannerReady
-              ? 'Aponte a camera ao codigo de barras.'
-              : 'Pressione escanear novamente para nova leitura.'}
-          </Text>
-        </View>
+        {!cameraUnavailable ? (
+          <>
+            <Camera
+              style={{ flex: 1 }}
+              device={device}
+              isActive={!!isFocused && !!hasPermission}
+              codeScanner={codeScanner}
+              onError={handleCameraError}
+            />
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                padding: 16,
+                backgroundColor: 'rgba(0,0,0,0.35)',
+              }}>
+              <Text className="text-white">
+                {scannerReady
+                  ? 'Aponte a camera ao codigo de barras.'
+                  : 'Pressione escanear novamente para nova leitura.'}
+              </Text>
+            </View>
+          </>
+        ) : (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <Text variant="title3" className="mb-2 font-semibold text-foreground">
+              Camera indisponivel
+            </Text>
+            <Text className="text-center text-foreground">
+              {cameraError ??
+                'Nao foi possivel acessar a camera. Verifique as permissões e tente novamente.'}
+            </Text>
+            <Button className="mt-4" variant="secondary" onPress={handleRescan}>
+              <Text>Tentar novamente</Text>
+            </Button>
+          </View>
+        )}
       </View>
       <View style={{ padding: 16, gap: 12 }}>
         <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
@@ -405,6 +465,9 @@ export default function AmostraScreen() {
           </View>
         ) : null}
         {error ? <Text className="text-red-500">{error}</Text> : null}
+        {cameraError && !cameraUnavailable ? (
+          <Text className="text-red-500">{cameraError}</Text>
+        ) : null}
         <Text variant="title3" className="font-semibold">
           Planilha
         </Text>
