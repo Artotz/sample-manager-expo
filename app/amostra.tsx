@@ -83,6 +83,32 @@ function sanitizeCellValue(raw: string): string {
   return raw.replace(/\r?\n/g, ' ').replace(/\t/g, ' ').trim();
 }
 
+function formatStatusLabel(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '-';
+  const lower = trimmed.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+function formatDate(value: string | Date | null | undefined): string {
+  if (!value) return '-';
+  try {
+    const date =
+      typeof value === 'string'
+        ? new Date(value)
+        : value instanceof Date
+          ? value
+          : new Date(String(value));
+    if (Number.isNaN(date.getTime())) return '-';
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  } catch {
+    return '-';
+  }
+}
+
 function buildExportText(rows: AmostraRow[]): string {
   const headerLine = EXPORT_HEADERS.map(({ header }) => sanitizeCellValue(header)).join(
     COLUMN_DELIMITER
@@ -109,41 +135,79 @@ function pickFirst<T>(value: T): T {
 
 function normalizeRow(data: any, codigo: string): AmostraRow {
   const payload = pickFirst(data?.data ?? data);
+  const coletaEquip = payload?.coleta?.dadosColetaEquipamento ?? {};
+  const coletaCompartimento = coletaEquip?.compartimento ?? payload?.compartimento ?? {};
+  const coletaEquipamento = coletaEquip?.equipamento ?? payload?.equipamento ?? {};
+  const coletaGeral = payload?.coleta?.dadosColetaGeral ?? {};
+  const oleoInfo = coletaGeral?.oleo ?? payload?.oleo ?? {};
+  const statusSource =
+    (typeof payload?.situacao === 'string' && payload.situacao) ||
+    (typeof payload?.status === 'string' && payload.status) ||
+    (typeof payload?.statusDescricao === 'string' && payload.statusDescricao) ||
+    '';
+
+  const status = statusSource ? formatStatusLabel(statusSource) : valueOrDash(statusSource);
+  const dataColetaValue =
+    coletaGeral?.dataColeta ??
+    payload?.dataColeta ??
+    payload?.coletaEm ??
+    payload?.dataColetaIso ??
+    null;
+
   return {
     amostra:
       valueOrDash(
         payload?.numeroAmostra ?? payload?.amostra ?? codigo ?? payload?.codigo ?? payload?.id
       ) ?? '-',
-    dataEntrega: valueOrDash(
-      payload?.dataEntrega ?? payload?.dataEntregaPrevista ?? payload?.entrega ?? '-'
-    ),
+    dataEntrega: formatDate(new Date()),
     compartimento: valueOrDash(
-      payload?.compartimento ?? payload?.componente ?? payload?.local ?? '-'
+      coletaCompartimento?.nome ??
+        payload?.compartimento ??
+        payload?.componente ??
+        payload?.local ??
+        '-'
     ),
     chassi: valueOrDash(
-      payload?.chassi ??
+      coletaEquipamento?.chassiSerie ??
+        coletaEquipamento?.chassi ??
+        payload?.chassi ??
         payload?.equipamento?.chassi ??
         payload?.equipamentoChassi ??
         payload?.maquina ??
         '-'
     ),
     cliente: valueOrDash(
-      payload?.cliente?.nome ?? payload?.equipamento?.cliente ?? payload?.clienteNome ?? '-'
+      payload?.obra ??
+        payload?.cliente?.nome ??
+        coletaEquipamento?.cliente ??
+        payload?.equipamento?.cliente ??
+        payload?.clienteNome ??
+        '-'
     ),
     horasEquipamento: valueOrDash(
-      payload?.horasEquipamento ??
+      coletaEquip?.horasEquipamentoColeta ??
+        payload?.horasEquipamento ??
         payload?.equipamento?.horimetro ??
         payload?.horasMaquina ??
         payload?.horimetro ??
         '-'
     ),
-    tipoOleo: valueOrDash(payload?.tipoOleo ?? payload?.oleo ?? payload?.tipoLubrificante ?? '-'),
-    status: valueOrDash(payload?.status ?? payload?.statusDescricao ?? payload?.situacao ?? '-'),
-    dataColeta: valueOrDash(
-      payload?.dataColeta ?? payload?.coletaEm ?? payload?.dataColetaIso ?? '-'
+    tipoOleo: valueOrDash(
+      oleoInfo?.viscosidade?.nome ??
+        oleoInfo?.fabricanteOleo?.nome ??
+        payload?.tipoOleo ??
+        payload?.oleo ??
+        payload?.tipoLubrificante ??
+        '-'
     ),
+    status,
+    dataColeta: formatDate(dataColetaValue),
     tecnico: valueOrDash(
-      payload?.tecnico ?? payload?.tecnicoResponsavel ?? payload?.responsavel ?? '-'
+      payload?.responsavelRegistro ??
+        payload?.tecnico ??
+        payload?.tecnicoResponsavel ??
+        payload?.responsavel ??
+        '-'
     ),
   };
 }
@@ -167,9 +231,7 @@ export default function AmostraScreen() {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<AmostraRow[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
-  const [columnWidths, setColumnWidths] = useState<
-    Partial<Record<keyof AmostraRow, number>>
-  >({});
+  const [columnWidths, setColumnWidths] = useState<Partial<Record<keyof AmostraRow, number>>>({});
   const [exportContent, setExportContent] = useState<string | null>(null);
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [cameraUnavailable, setCameraUnavailable] = useState(false);
@@ -267,6 +329,9 @@ export default function AmostraScreen() {
         return;
       }
       const data = await s360GetAmostra(codigo, token);
+
+      console.log(JSON.stringify(data, null, 2));
+
       const row = normalizeRow(data, codigo);
       setHistory((prev) => {
         const filtered = prev.filter((item) => item.amostra !== row.amostra);
@@ -282,18 +347,18 @@ export default function AmostraScreen() {
 
   const codeScanner = useCodeScanner({
     codeTypes: [
-      'qr',
-      'ean-13',
-      'ean-8',
+      // 'qr',
+      // 'ean-13',
+      // 'ean-8',
       'code-128',
-      'code-39',
-      'upc-a',
-      'upc-e',
-      'pdf-417',
-      'aztec',
-      'codabar',
-      'data-matrix',
-      'itf',
+      // 'code-39',
+      // 'upc-a',
+      // 'upc-e',
+      // 'pdf-417',
+      // 'aztec',
+      // 'codabar',
+      // 'data-matrix',
+      // 'itf',
     ],
     onCodeScanned: (codes) => {
       if (!scannerReady || loading) return;
@@ -498,36 +563,55 @@ export default function AmostraScreen() {
                 );
               })}
             </View>
-            {history.map((row) => (
-              <View
-                key={`row-${row.amostra}-${row.dataColeta}`}
-                style={{
-                  flexDirection: 'row',
-                  borderBottomWidth: 1,
-                  borderColor: '#f3f4f6',
-                }}>
-                {tableColumns.map((column) => {
-                  const resolvedWidth = Math.max(columnWidths[column.key] ?? 0, column.minWidth);
-                  return (
-                    <View
-                      key={`cell-${row.amostra}-${column.key}`}
-                      style={{
-                        minWidth: resolvedWidth,
-                        paddingHorizontal: 4,
-                        paddingVertical: 8,
-                      }}
-                      onLayout={({ nativeEvent }) => {
-                        const measuredWidth = Math.max(nativeEvent.layout.width, column.minWidth);
-                        updateColumnWidth(column.key, measuredWidth);
-                      }}>
-                      <Text style={{ fontSize: 12 }} selectable>
-                        {row[column.key]}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            ))}
+            {history.map((row) => {
+              const statusKey = row.status?.toString().trim().toLowerCase();
+              const backgroundColor =
+                statusKey === 'aguardando'
+                  ? '#fee2e2'
+                  : statusKey === 'coletada'
+                    ? '#dcfce7'
+                    : 'transparent';
+              const foregroundColor =
+                statusKey === 'aguardando'
+                  ? '#991b1b'
+                  : statusKey === 'coletada'
+                    ? '#166534'
+                    : undefined;
+
+              return (
+                <View
+                  key={`row-${row.amostra}-${row.dataColeta}`}
+                  style={{
+                    flexDirection: 'row',
+                    borderBottomWidth: 1,
+                    borderColor: '#f3f4f6',
+                    backgroundColor,
+                  }}>
+                  {tableColumns.map((column) => {
+                    const resolvedWidth = Math.max(columnWidths[column.key] ?? 0, column.minWidth);
+                    return (
+                      <View
+                        key={`cell-${row.amostra}-${column.key}`}
+                        style={{
+                          minWidth: resolvedWidth,
+                          paddingHorizontal: 4,
+                          paddingVertical: 8,
+                        }}
+                        onLayout={({ nativeEvent }) => {
+                          const measuredWidth = Math.max(nativeEvent.layout.width, column.minWidth);
+                          updateColumnWidth(column.key, measuredWidth);
+                        }}>
+                        <Text
+                          style={{ fontSize: 12, color: foregroundColor }}
+                          selectable>
+                          {row[column.key]}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              );
+            })}
           </View>
         </ScrollView>
       ) : null}
@@ -563,7 +647,8 @@ export default function AmostraScreen() {
                 </Text>
               </ScrollView>
             </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 16 }}>
+            <View
+              style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 16 }}>
               <Button variant="secondary" onPress={handleCopyFromModal}>
                 <Text>Tentar copiar</Text>
               </Button>
