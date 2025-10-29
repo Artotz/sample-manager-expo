@@ -37,11 +37,10 @@ export default function RootLayout() {
         <ActionSheetProvider>
           <NavThemeProvider value={NAV_THEME[colorScheme]}>
             <Stack>
-              <Stack.Screen name="index" options={INDEX_OPTIONS} />
-              <Stack.Screen name="login" options={{ title: 'Login' }} />
+              <Stack.Screen name="index" options={{ title: 'Login' }} />
+              {/* <Stack.Screen name="login" options={{ title: 'Login' }} /> */}
               <Stack.Screen name="amostra" options={{ title: 'Amostra' }} />
               <Stack.Screen name="scan" options={{ title: 'Leitura' }} />
-              <Stack.Screen name="modal" options={MODAL_OPTIONS} />
             </Stack>
           </NavThemeProvider>
         </ActionSheetProvider>
@@ -51,26 +50,26 @@ export default function RootLayout() {
   );
 }
 
-const INDEX_OPTIONS = {
-  headerLargeTitle: true,
-  headerTransparent: isIos26,
-  title: 'NativewindUI',
-  headerRight: () => <SettingsIcon />,
-} as const;
+// const INDEX_OPTIONS = {
+//   headerLargeTitle: true,
+//   headerTransparent: isIos26,
+//   title: 'NativewindUI',
+//   headerRight: () => <SettingsIcon />,
+// } as const;
 
-function SettingsIcon() {
-  return (
-    <Link href="/modal" asChild>
-      <Pressable className={cn('opacity-80 active:opacity-50', isIos26 && 'px-1.5')}>
-        <Icon name="gearshape" className="text-foreground" />
-      </Pressable>
-    </Link>
-  );
-}
+// function SettingsIcon() {
+//   return (
+//     <Link href="/modal" asChild>
+//       <Pressable className={cn('opacity-80 active:opacity-50', isIos26 && 'px-1.5')}>
+//         <Icon name="gearshape" className="text-foreground" />
+//       </Pressable>
+//     </Link>
+//   );
+// }
 
-const MODAL_OPTIONS = {
-  presentation: 'modal',
-  animation: 'fade_from_bottom', // for android
-  title: 'Settings',
-  headerRight: () => <ThemeToggle />,
-} as const;
+// const MODAL_OPTIONS = {
+//   presentation: 'modal',
+//   animation: 'fade_from_bottom', // for android
+//   title: 'Settings',
+//   headerRight: () => <ThemeToggle />,
+// } as const;
