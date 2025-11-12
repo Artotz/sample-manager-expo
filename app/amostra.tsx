@@ -1,15 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Modal, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, ScrollView, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { router, type Href } from 'expo-router';
 import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
 import * as SecureStore from 'expo-secure-store';
+import {
+  cacheDirectory,
+  documentDirectory,
+  writeAsStringAsync,
+  EncodingType,
+} from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import * as XLSX from 'xlsx';
 
 import { Button } from '@/components/nativewindui/Button';
 import { Text } from '@/components/nativewindui/Text';
 import { getToken } from '@/lib/session';
 import { s360GetAmostra } from '@/lib/s360/api';
-import { useColorScheme } from '@/lib/useColorScheme';
 
 import type { CameraRuntimeError } from 'react-native-vision-camera';
 
@@ -49,9 +56,7 @@ const TABLE_KEYS = TABLE_COLUMNS.map((column) => column.key);
 const LOGIN_ROUTE = '/login' as Href;
 const HISTORY_STORAGE_KEY = 's360_planilha_history_v1';
 const HISTORY_LIMIT = 100;
-const COLUMN_DELIMITER = '\t';
-const ROW_DELIMITER = '\r\n';
-const EXPORT_HEADERS: Array<{ key: keyof AmostraRow; header: string }> = [
+const EXPORT_HEADERS: { key: keyof AmostraRow; header: string }[] = [
   { key: 'amostra', header: 'Amostra' },
   { key: 'dataEntrega', header: 'Data de entrega' },
   { key: 'compartimento', header: 'Compartimento' },
@@ -63,21 +68,6 @@ const EXPORT_HEADERS: Array<{ key: keyof AmostraRow; header: string }> = [
   { key: 'dataColeta', header: 'Data de coleta' },
   { key: 'tecnico', header: 'Tecnico' },
 ];
-
-async function tryCopyToClipboard(text: string): Promise<boolean> {
-  try {
-    const navClipboard = (typeof navigator !== 'undefined' &&
-      'clipboard' in navigator &&
-      navigator.clipboard) as Clipboard | undefined;
-    if (navClipboard && typeof navClipboard.writeText === 'function') {
-      await navClipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // ignore and fallback
-  }
-  return false;
-}
 
 function sanitizeCellValue(raw: string): string {
   return raw.replace(/\r?\n/g, ' ').replace(/\t/g, ' ').trim();
@@ -109,14 +99,15 @@ function formatDate(value: string | Date | null | undefined): string {
   }
 }
 
-function buildExportText(rows: AmostraRow[]): string {
-  const headerLine = EXPORT_HEADERS.map(({ header }) => sanitizeCellValue(header)).join(
-    COLUMN_DELIMITER
-  );
-  const content = rows.map((row) =>
-    EXPORT_HEADERS.map(({ key }) => sanitizeCellValue(row[key])).join(COLUMN_DELIMITER)
-  );
-  return [headerLine, ...content].join(ROW_DELIMITER);
+function buildWorkbookBase64(rows: AmostraRow[]): string {
+  const worksheetData = [
+    EXPORT_HEADERS.map(({ header }) => sanitizeCellValue(header)),
+    ...rows.map((row) => EXPORT_HEADERS.map(({ key }) => sanitizeCellValue(row[key]))),
+  ];
+  const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Amostras');
+  return XLSX.write(workbook, { type: 'base64', bookType: 'xlsx' });
 }
 
 function valueOrDash(value: unknown): string {
@@ -232,12 +223,8 @@ export default function AmostraScreen() {
   const [history, setHistory] = useState<AmostraRow[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [columnWidths, setColumnWidths] = useState<Partial<Record<keyof AmostraRow, number>>>({});
-  const [exportContent, setExportContent] = useState<string | null>(null);
-  const [exportModalVisible, setExportModalVisible] = useState(false);
   const [cameraUnavailable, setCameraUnavailable] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-
-  const { isDarkColorScheme } = useColorScheme();
 
   const isFocused = useIsFocused();
   const device = useCameraDevice('back');
@@ -386,14 +373,36 @@ export default function AmostraScreen() {
       Alert.alert('Planilha vazia', 'Nenhuma leitura para exportar.');
       return;
     }
-    const exportText = buildExportText(history);
-    const copied = await tryCopyToClipboard(exportText);
-    if (copied) {
-      Alert.alert('Copiado', 'Planilha copiada para a area de transferencia.');
-      return;
+    try {
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        Alert.alert(
+          'Compartilhamento indisponivel',
+          'Compartilhar arquivos nao e suportado neste dispositivo.'
+        );
+        return;
+      }
+      const workbookBase64 = buildWorkbookBase64(history);
+      const timestamp = Date.now();
+      const fileName = `Relatorio_Amostras_${timestamp}.xlsx`;
+      const directory = cacheDirectory ?? documentDirectory ?? '';
+      if (!directory) {
+        Alert.alert('Erro', 'Nao foi possivel acessar o armazenamento temporario.');
+        return;
+      }
+      const fileUri = `${directory}${fileName}`;
+      await writeAsStringAsync(fileUri, workbookBase64, {
+        encoding: EncodingType.Base64,
+      });
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        dialogTitle: 'Compartilhar planilha',
+        UTI: 'com.microsoft.excel.xlsx',
+      });
+    } catch (err) {
+      console.error('Erro ao compartilhar planilha', err);
+      Alert.alert('Erro', 'Nao foi possivel compartilhar a planilha.');
     }
-    setExportContent(exportText);
-    setExportModalVisible(true);
   }, [history]);
 
   const handleClearHistory = useCallback(() => {
@@ -412,20 +421,6 @@ export default function AmostraScreen() {
       },
     ]);
   }, []);
-
-  const closeExportModal = useCallback(() => {
-    setExportModalVisible(false);
-    setExportContent(null);
-  }, []);
-
-  const handleCopyFromModal = useCallback(async () => {
-    if (!exportContent) return;
-    const copied = await tryCopyToClipboard(exportContent);
-    if (copied) {
-      Alert.alert('Copiado', 'Planilha copiada para a area de transferencia.');
-      closeExportModal();
-    }
-  }, [closeExportModal, exportContent]);
 
   const handleCameraError = useCallback((err: CameraRuntimeError) => {
     const code = err?.code ?? '';
@@ -513,7 +508,7 @@ export default function AmostraScreen() {
             <Text>Escanear novamente</Text>
           </Button>
           <Button variant="secondary" onPress={handleExport}>
-            <Text>Exportar .xlsx</Text>
+            <Text>Compartilhar .xlsx</Text>
           </Button>
           <Button
             variant="secondary"
@@ -538,127 +533,98 @@ export default function AmostraScreen() {
         </Text>
         {history.length === 0 ? <Text>Nenhuma amostra verificada ainda.</Text> : null}
       </View>
+      {/* Dá um limite de altura à região da tabela */}
       {history.length ? (
-        <ScrollView horizontal contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}>
-          <View style={{ paddingBottom: 12 }}>
-            <View
-              style={{
-                flexDirection: 'row',
-                borderBottomWidth: 1,
-                borderColor: '#e5e7eb',
-              }}>
-              {tableColumns.map((column) => {
-                const resolvedWidth = Math.max(columnWidths[column.key] ?? 0, column.minWidth);
-                return (
-                  <View
-                    key={`header-${column.key}`}
-                    style={{
-                      width: resolvedWidth,
-                      minWidth: column.minWidth,
-                      paddingHorizontal: 4,
-                      paddingVertical: 6,
-                    }}>
-                    <Text style={{ fontWeight: '600', fontSize: 12 }}>{column.label}</Text>
-                  </View>
-                );
-              })}
-            </View>
-            {history.map((row) => {
-              const statusKey = row.status?.toString().trim().toLowerCase();
-              const backgroundColor =
-                statusKey === 'aguardando'
-                  ? '#fee2e2'
-                  : statusKey === 'coletada'
-                    ? '#dcfce7'
-                    : 'transparent';
-              const foregroundColor =
-                statusKey === 'aguardando'
-                  ? '#991b1b'
-                  : statusKey === 'coletada'
-                    ? '#166534'
-                    : undefined;
+        <View style={{ maxHeight: 260 /* ajuste como preferir */ }}>
+          <ScrollView
+            horizontal
+            style={{ flexGrow: 0 }} // não “estica” para ocupar espaço extra
+            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+            bounces={false}
+            showsHorizontalScrollIndicator>
+            <View style={{ paddingBottom: 12 }}>
+              {/* header */}
+              <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#e5e7eb' }}>
+                {tableColumns.map((column) => {
+                  const resolvedWidth = Math.max(columnWidths[column.key] ?? 0, column.minWidth);
+                  return (
+                    <View
+                      key={`header-${column.key}`}
+                      style={{
+                        width: resolvedWidth,
+                        minWidth: column.minWidth,
+                        paddingHorizontal: 4,
+                        paddingVertical: 6,
+                      }}>
+                      <Text style={{ fontWeight: '600', fontSize: 12 }}>{column.label}</Text>
+                    </View>
+                  );
+                })}
+              </View>
 
-              return (
-                <View
-                  key={`row-${row.amostra}-${row.dataColeta}`}
-                  style={{
-                    flexDirection: 'row',
-                    borderBottomWidth: 1,
-                    borderColor: '#f3f4f6',
-                    backgroundColor,
-                  }}>
-                  {tableColumns.map((column) => {
-                    const resolvedWidth = Math.max(columnWidths[column.key] ?? 0, column.minWidth);
-                    return (
-                      <View
-                        key={`cell-${row.amostra}-${column.key}`}
-                        style={{
-                          minWidth: resolvedWidth,
-                          paddingHorizontal: 4,
-                          paddingVertical: 8,
-                        }}
-                        onLayout={({ nativeEvent }) => {
-                          const measuredWidth = Math.max(nativeEvent.layout.width, column.minWidth);
-                          updateColumnWidth(column.key, measuredWidth);
-                        }}>
-                        <Text
-                          style={{ fontSize: 12, color: foregroundColor }}
-                          selectable>
-                          {row[column.key]}
-                        </Text>
-                      </View>
-                    );
-                  })}
-                </View>
-              );
-            })}
-          </View>
-        </ScrollView>
-      ) : null}
-      <Modal
-        visible={exportModalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={closeExportModal}>
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.45)',
-            justifyContent: 'center',
-            padding: 16,
-          }}>
-          <View
-            style={{
-              backgroundColor: isDarkColorScheme ? '#111827' : '#ffffff',
-              borderRadius: 12,
-              padding: 16,
-              maxHeight: '80%',
-            }}>
-            <Text variant="title3" className="font-semibold text-foreground">
-              Copie a planilha
-            </Text>
-            <Text className="mt-1 text-foreground">
-              Selecione e copie o texto abaixo e cole no Excel. As colunas estao separadas por tab.
-            </Text>
-            <View style={{ marginTop: 12, maxHeight: '70%' }}>
-              <ScrollView>
-                <Text selectable className="font-mono text-xs text-foreground">
-                  {exportContent ?? ''}
-                </Text>
+              {/* corpo: se o número de linhas for grande, use um ScrollView vertical com altura controlada */}
+              <ScrollView
+                style={{ maxHeight: 220 }} // mantém a lista vertical contida
+                nestedScrollEnabled // permite scroll dentro do scroll horizontal
+                showsVerticalScrollIndicator>
+                {history.map((row) => {
+                  const statusKey = row.status?.toString().trim().toLowerCase();
+                  const backgroundColor =
+                    statusKey === 'aguardando'
+                      ? '#fee2e2'
+                      : statusKey === 'coletada'
+                        ? '#dcfce7'
+                        : 'transparent';
+                  const foregroundColor =
+                    statusKey === 'aguardando'
+                      ? '#991b1b'
+                      : statusKey === 'coletada'
+                        ? '#166534'
+                        : undefined;
+
+                  return (
+                    <View
+                      key={`row-${row.amostra}-${row.dataColeta}`}
+                      style={{
+                        flexDirection: 'row',
+                        borderBottomWidth: 1,
+                        borderColor: '#f3f4f6',
+                        backgroundColor,
+                      }}>
+                      {tableColumns.map((column) => {
+                        const resolvedWidth = Math.max(
+                          columnWidths[column.key] ?? 0,
+                          column.minWidth
+                        );
+                        return (
+                          <View
+                            key={`cell-${row.amostra}-${column.key}`}
+                            style={{
+                              minWidth: resolvedWidth,
+                              paddingHorizontal: 4,
+                              paddingVertical: 8,
+                            }}
+                            onLayout={({ nativeEvent }) => {
+                              const measuredWidth = Math.max(
+                                nativeEvent.layout.width,
+                                column.minWidth
+                              );
+                              updateColumnWidth(column.key, measuredWidth);
+                            }}>
+                            <Text style={{ fontSize: 12, color: foregroundColor }} selectable>
+                              {row[column.key]}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  );
+                })}
               </ScrollView>
             </View>
-            <View
-              style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 16 }}>
-              <Button variant="secondary" onPress={handleCopyFromModal}>
-                <Text>Tentar copiar</Text>
-              </Button>
-              <Button variant="tonal" onPress={closeExportModal}>
-                <Text>Fechar</Text>
-              </Button>
-            </View>
-          </View>
+          </ScrollView>
         </View>
-      </Modal>
+      ) : null}
     </View>
   );
 }
