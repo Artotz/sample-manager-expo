@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, ScrollView, View } from 'react-native';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Pressable, ScrollView, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { router, type Href } from 'expo-router';
 import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
@@ -68,6 +68,34 @@ const EXPORT_HEADERS: { key: keyof AmostraRow; header: string }[] = [
   { key: 'dataColeta', header: 'Data de coleta' },
   { key: 'tecnico', header: 'Tecnico' },
 ];
+
+const LATEST_SAMPLE_FIELDS: { key: keyof AmostraRow; label: string }[] = [
+  { key: 'cliente', label: 'Cliente' },
+  { key: 'compartimento', label: 'Compartimento' },
+  { key: 'chassi', label: 'Chassi' },
+  { key: 'tipoOleo', label: 'Tipo do oleo' },
+  { key: 'horasEquipamento', label: 'Horas do equipamento' },
+  { key: 'dataColeta', label: 'Data de coleta' },
+  { key: 'dataEntrega', label: 'Data de entrega' },
+  { key: 'tecnico', label: 'Tecnico responsavel' },
+];
+
+function getStatusColors(status: string | null | undefined): {
+  backgroundColor: string;
+  foregroundColor?: string;
+} {
+  const normalized = status?.toString().trim().toLowerCase();
+  if (!normalized) {
+    return { backgroundColor: 'transparent' };
+  }
+  if (normalized === 'aguardando') {
+    return { backgroundColor: '#fee2e2', foregroundColor: '#991b1b' };
+  }
+  if (normalized === 'coletada') {
+    return { backgroundColor: '#dcfce7', foregroundColor: '#166534' };
+  }
+  return { backgroundColor: 'transparent' };
+}
 
 function sanitizeCellValue(raw: string): string {
   return raw.replace(/\r?\n/g, ' ').replace(/\t/g, ' ').trim();
@@ -222,6 +250,9 @@ export default function AmostraScreen() {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<AmostraRow[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [highlightedSample, setHighlightedSample] = useState<AmostraRow | null>(null);
+  const [awaitingNextScan, setAwaitingNextScan] = useState(false);
+  const [historyCollapsed, setHistoryCollapsed] = useState(true);
   const [columnWidths, setColumnWidths] = useState<Partial<Record<keyof AmostraRow, number>>>({});
   const [cameraUnavailable, setCameraUnavailable] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -230,6 +261,10 @@ export default function AmostraScreen() {
   const device = useCameraDevice('back');
 
   const tableColumns = useMemo(() => TABLE_COLUMNS, []);
+  const highlightedStatusColors = useMemo(
+    () => getStatusColors(highlightedSample?.status),
+    [highlightedSample?.status]
+  );
 
   const updateColumnWidth = useCallback((key: keyof AmostraRow, width: number) => {
     setColumnWidths((prev) => {
@@ -270,6 +305,8 @@ export default function AmostraScreen() {
               .map(sanitizeStoredRow)
               .filter((row): row is AmostraRow => !!row);
             setHistory(sanitized);
+            setHighlightedSample((prev) => prev ?? sanitized[0] ?? null);
+            setAwaitingNextScan(false);
           }
         }
       } catch {
@@ -320,6 +357,8 @@ export default function AmostraScreen() {
       console.log(JSON.stringify(data, null, 2));
 
       const row = normalizeRow(data, codigo);
+      setHighlightedSample(row);
+      setAwaitingNextScan(false);
       setHistory((prev) => {
         const filtered = prev.filter((item) => item.amostra !== row.amostra);
         const next = [row, ...filtered];
@@ -358,6 +397,8 @@ export default function AmostraScreen() {
 
   const handleRescan = useCallback(async () => {
     setError(null);
+    setHighlightedSample(null);
+    setAwaitingNextScan(true);
     setScannerReady(true);
     setCameraError(null);
     setCameraUnavailable(false);
@@ -414,6 +455,9 @@ export default function AmostraScreen() {
         onPress: () => {
           setHistory([]);
           setColumnWidths({});
+          setHighlightedSample(null);
+          setAwaitingNextScan(false);
+          setHistoryCollapsed(true);
           setError(null);
           setScannerReady(true);
           void SecureStore.deleteItemAsync(HISTORY_STORAGE_KEY);
@@ -434,6 +478,11 @@ export default function AmostraScreen() {
     setCameraUnavailable(true);
     setScannerReady(false);
   }, []);
+
+  const toggleHistoryCollapsed = useCallback(() => {
+    if (!history.length) return;
+    setHistoryCollapsed((prev) => !prev);
+  }, [history.length]);
 
   if (hasPermission === null || device == null) {
     return (
@@ -459,172 +508,270 @@ export default function AmostraScreen() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <ScrollView>
       <View style={{ flex: 1 }}>
-        {!cameraUnavailable ? (
-          <>
-            <Camera
-              style={{ flex: 1 }}
-              device={device}
-              isActive={!!isFocused && !!hasPermission}
-              codeScanner={codeScanner}
-              onError={handleCameraError}
-            />
-            <View
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 0,
-                padding: 16,
-                backgroundColor: 'rgba(0,0,0,0.35)',
-              }}>
-              <Text className="text-white">
-                {scannerReady
-                  ? 'Aponte a camera ao codigo de barras.'
-                  : 'Pressione escanear novamente para nova leitura.'}
+        <View style={{ flex: 1 }}>
+          {!cameraUnavailable ? (
+            <>
+              <Camera
+                style={{ flex: 1 }}
+                device={device}
+                isActive={!!isFocused && !!hasPermission}
+                codeScanner={codeScanner}
+                onError={handleCameraError}
+              />
+              <View
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  padding: 16,
+                  backgroundColor: 'rgba(0,0,0,0.35)',
+                }}>
+                <Text className="text-white">
+                  {scannerReady
+                    ? 'Aponte a camera ao codigo de barras.'
+                    : 'Pressione escanear novamente para nova leitura.'}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+              <Text variant="title3" className="mb-2 font-semibold text-foreground">
+                Camera indisponivel
               </Text>
+              <Text className="text-center text-foreground">
+                {cameraError ??
+                  'Nao foi possivel acessar a camera. Verifique as permissões e tente novamente.'}
+              </Text>
+              <Button className="mt-4" variant="secondary" onPress={handleRescan}>
+                <Text>Tentar novamente</Text>
+              </Button>
             </View>
-          </>
-        ) : (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-            <Text variant="title3" className="mb-2 font-semibold text-foreground">
-              Camera indisponivel
-            </Text>
-            <Text className="text-center text-foreground">
-              {cameraError ??
-                'Nao foi possivel acessar a camera. Verifique as permissões e tente novamente.'}
-            </Text>
-            <Button className="mt-4" variant="secondary" onPress={handleRescan}>
-              <Text>Tentar novamente</Text>
+          )}
+        </View>
+        <View style={{ padding: 16, gap: 16 }}>
+          <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
+            <Button variant="tonal" onPress={handleRescan} disabled={loading}>
+              <Text>Escanear novamente</Text>
+            </Button>
+            <Button variant="secondary" onPress={handleExport}>
+              <Text>Compartilhar .xlsx</Text>
+            </Button>
+            <Button
+              variant="secondary"
+              onPress={handleClearHistory}
+              disabled={!history.length}
+              className="border-red-500">
+              <Text className="text-red-600">Limpar planilha</Text>
             </Button>
           </View>
-        )}
-      </View>
-      <View style={{ padding: 16, gap: 12 }}>
-        <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
-          <Button variant="tonal" onPress={handleRescan} disabled={loading}>
-            <Text>Escanear novamente</Text>
-          </Button>
-          <Button variant="secondary" onPress={handleExport}>
-            <Text>Compartilhar .xlsx</Text>
-          </Button>
-          <Button
-            variant="secondary"
-            onPress={handleClearHistory}
-            disabled={!history.length}
-            className="border-red-500">
-            <Text className="text-red-600">Limpar planilha</Text>
-          </Button>
+          {loading ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <ActivityIndicator size="small" />
+              <Text>Consultando amostra...</Text>
+            </View>
+          ) : null}
+          {error ? <Text className="text-red-500">{error}</Text> : null}
+          {cameraError && !cameraUnavailable ? (
+            <Text className="text-red-500">{cameraError}</Text>
+          ) : null}
+          <View style={{ gap: 8 }}>
+            <Text variant="title3" className="font-semibold">
+              Ultima amostra
+            </Text>
+            {awaitingNextScan ? (
+              <View
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#e5e7eb',
+                  borderRadius: 12,
+                  padding: 12,
+                  backgroundColor: '#f9fafb',
+                  gap: 4,
+                }}>
+                <Text className="font-semibold text-foreground">Aguardando nova leitura</Text>
+                <Text style={{ color: '#6b7280' }}>
+                  Pressione o botao escanear e mire a camera para preencher esta area.
+                </Text>
+              </View>
+            ) : highlightedSample ? (
+              <View
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#e5e7eb',
+                  borderRadius: 12,
+                  padding: 12,
+                  backgroundColor: '#fff',
+                  gap: 12,
+                }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 12, color: '#6b7280' }}>Codigo</Text>
+                    <Text className="text-lg font-semibold text-foreground">
+                      {highlightedSample.amostra}
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      alignSelf: 'flex-start',
+                      borderRadius: 9999,
+                      paddingHorizontal: 12,
+                      paddingVertical: 4,
+                      backgroundColor: highlightedStatusColors.backgroundColor,
+                    }}>
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontWeight: '600',
+                        color: highlightedStatusColors.foregroundColor ?? '#111827',
+                      }}>
+                      {formatStatusLabel(highlightedSample.status)}
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                  {LATEST_SAMPLE_FIELDS.map((field) => (
+                    <View key={field.key} style={{ width: '48%' }}>
+                      <Text style={{ fontSize: 12, color: '#6b7280' }}>{field.label}</Text>
+                      <Text className="font-medium text-foreground">
+                        {highlightedSample[field.key]}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : (
+              <View
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#e5e7eb',
+                  borderRadius: 12,
+                  padding: 12,
+                  backgroundColor: '#f9fafb',
+                  gap: 4,
+                }}>
+                <Text className="font-semibold text-foreground">
+                  Nenhuma amostra verificada ainda
+                </Text>
+                <Text style={{ color: '#6b7280' }}>
+                  A ultima amostra consultada aparecera aqui para acesso rapido.
+                </Text>
+              </View>
+            )}
+          </View>
+          <View style={{ gap: 8 }}>
+            <Pressable
+              disabled={!history.length}
+              onPress={toggleHistoryCollapsed}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: 12,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: '#e5e7eb',
+                backgroundColor: '#f9fafb',
+                opacity: history.length ? 1 : 0.6,
+              }}>
+              <View>
+                <Text variant="title3" className="font-semibold">
+                  Planilha
+                </Text>
+                <Text style={{ fontSize: 12, color: '#6b7280' }}>
+                  {history.length ? `${history.length} registros` : 'Sem registros salvos'}
+                </Text>
+              </View>
+              <Text style={{ fontWeight: '600' }}>{historyCollapsed ? 'Mostrar' : 'Ocultar'}</Text>
+            </Pressable>
+            {history.length === 0 ? <Text>Nenhuma amostra verificada ainda.</Text> : null}
+          </View>
         </View>
-        {loading ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <ActivityIndicator size="small" />
-            <Text>Consultando amostra...</Text>
+        {/* Limita a altura disponivel para a tabela */}
+        {!historyCollapsed && history.length ? (
+          <View style={{ maxHeight: 260 /* ajuste como preferir */ }}>
+            <ScrollView
+              horizontal
+              style={{ flexGrow: 0 }} // não “estica” para ocupar espaço extra
+              contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+              bounces={false}
+              showsHorizontalScrollIndicator>
+              <View style={{ paddingBottom: 12 }}>
+                {/* header */}
+                <View
+                  style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#e5e7eb' }}>
+                  {tableColumns.map((column) => {
+                    const resolvedWidth = Math.max(columnWidths[column.key] ?? 0, column.minWidth);
+                    return (
+                      <View
+                        key={`header-${column.key}`}
+                        style={{
+                          width: resolvedWidth,
+                          minWidth: column.minWidth,
+                          paddingHorizontal: 4,
+                          paddingVertical: 6,
+                        }}>
+                        <Text style={{ fontWeight: '600', fontSize: 12 }}>{column.label}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {/* corpo: se o número de linhas for grande, use um ScrollView vertical com altura controlada */}
+                <ScrollView
+                  style={{ maxHeight: 220 }} // mantém a lista vertical contida
+                  nestedScrollEnabled // permite scroll dentro do scroll horizontal
+                  showsVerticalScrollIndicator>
+                  {history.map((row) => {
+                    const { backgroundColor, foregroundColor } = getStatusColors(row.status);
+
+                    return (
+                      <View
+                        key={`row-${row.amostra}-${row.dataColeta}`}
+                        style={{
+                          flexDirection: 'row',
+                          borderBottomWidth: 1,
+                          borderColor: '#f3f4f6',
+                          backgroundColor,
+                        }}>
+                        {tableColumns.map((column) => {
+                          const resolvedWidth = Math.max(
+                            columnWidths[column.key] ?? 0,
+                            column.minWidth
+                          );
+                          return (
+                            <View
+                              key={`cell-${row.amostra}-${column.key}`}
+                              style={{
+                                minWidth: resolvedWidth,
+                                paddingHorizontal: 4,
+                                paddingVertical: 8,
+                              }}
+                              onLayout={({ nativeEvent }) => {
+                                const measuredWidth = Math.max(
+                                  nativeEvent.layout.width,
+                                  column.minWidth
+                                );
+                                updateColumnWidth(column.key, measuredWidth);
+                              }}>
+                              <Text style={{ fontSize: 12, color: foregroundColor }} selectable>
+                                {row[column.key]}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            </ScrollView>
           </View>
         ) : null}
-        {error ? <Text className="text-red-500">{error}</Text> : null}
-        {cameraError && !cameraUnavailable ? (
-          <Text className="text-red-500">{cameraError}</Text>
-        ) : null}
-        <Text variant="title3" className="font-semibold">
-          Planilha
-        </Text>
-        {history.length === 0 ? <Text>Nenhuma amostra verificada ainda.</Text> : null}
       </View>
-      {/* Dá um limite de altura à região da tabela */}
-      {history.length ? (
-        <View style={{ maxHeight: 260 /* ajuste como preferir */ }}>
-          <ScrollView
-            horizontal
-            style={{ flexGrow: 0 }} // não “estica” para ocupar espaço extra
-            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
-            bounces={false}
-            showsHorizontalScrollIndicator>
-            <View style={{ paddingBottom: 12 }}>
-              {/* header */}
-              <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#e5e7eb' }}>
-                {tableColumns.map((column) => {
-                  const resolvedWidth = Math.max(columnWidths[column.key] ?? 0, column.minWidth);
-                  return (
-                    <View
-                      key={`header-${column.key}`}
-                      style={{
-                        width: resolvedWidth,
-                        minWidth: column.minWidth,
-                        paddingHorizontal: 4,
-                        paddingVertical: 6,
-                      }}>
-                      <Text style={{ fontWeight: '600', fontSize: 12 }}>{column.label}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-
-              {/* corpo: se o número de linhas for grande, use um ScrollView vertical com altura controlada */}
-              <ScrollView
-                style={{ maxHeight: 220 }} // mantém a lista vertical contida
-                nestedScrollEnabled // permite scroll dentro do scroll horizontal
-                showsVerticalScrollIndicator>
-                {history.map((row) => {
-                  const statusKey = row.status?.toString().trim().toLowerCase();
-                  const backgroundColor =
-                    statusKey === 'aguardando'
-                      ? '#fee2e2'
-                      : statusKey === 'coletada'
-                        ? '#dcfce7'
-                        : 'transparent';
-                  const foregroundColor =
-                    statusKey === 'aguardando'
-                      ? '#991b1b'
-                      : statusKey === 'coletada'
-                        ? '#166534'
-                        : undefined;
-
-                  return (
-                    <View
-                      key={`row-${row.amostra}-${row.dataColeta}`}
-                      style={{
-                        flexDirection: 'row',
-                        borderBottomWidth: 1,
-                        borderColor: '#f3f4f6',
-                        backgroundColor,
-                      }}>
-                      {tableColumns.map((column) => {
-                        const resolvedWidth = Math.max(
-                          columnWidths[column.key] ?? 0,
-                          column.minWidth
-                        );
-                        return (
-                          <View
-                            key={`cell-${row.amostra}-${column.key}`}
-                            style={{
-                              minWidth: resolvedWidth,
-                              paddingHorizontal: 4,
-                              paddingVertical: 8,
-                            }}
-                            onLayout={({ nativeEvent }) => {
-                              const measuredWidth = Math.max(
-                                nativeEvent.layout.width,
-                                column.minWidth
-                              );
-                              updateColumnWidth(column.key, measuredWidth);
-                            }}>
-                            <Text style={{ fontSize: 12, color: foregroundColor }} selectable>
-                              {row[column.key]}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  );
-                })}
-              </ScrollView>
-            </View>
-          </ScrollView>
-        </View>
-      ) : null}
-    </View>
+    </ScrollView>
   );
 }
