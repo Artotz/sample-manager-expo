@@ -6,6 +6,7 @@ import { ThemeProvider as NavThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ThemeToggle } from '@/components/nativewindui/ThemeToggle';
 import { useColorScheme } from '@/lib/useColorScheme';
@@ -28,15 +29,17 @@ export default function RootLayout() {
       {/* WRAP YOUR APP WITH ANY ADDITIONAL PROVIDERS HERE */}
       {/* <ExampleProvider> */}
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <ActionSheetProvider>
-          <NavThemeProvider value={NAV_THEME[colorScheme]}>
-            <Stack>
-              <Stack.Screen name="index" options={{ headerShown: false }} />
-              <Stack.Screen name="login" options={{ title: 'Login S360' }} />
-              <Stack.Screen name="amostra" options={{ title: 'Amostra' }} />
-            </Stack>
-          </NavThemeProvider>
-        </ActionSheetProvider>
+        <SafeAreaProvider>
+          <ActionSheetProvider>
+            <NavThemeProvider value={NAV_THEME[colorScheme]}>
+              <Stack>
+                <Stack.Screen name="index" options={{ headerShown: false }} />
+                <Stack.Screen name="login" options={{ title: 'Login S360' }} />
+                <Stack.Screen name="amostra" options={{ title: 'Amostra' }} />
+              </Stack>
+            </NavThemeProvider>
+          </ActionSheetProvider>
+        </SafeAreaProvider>
       </GestureHandlerRootView>
       {/* </ExampleProvider> */}
     </>
